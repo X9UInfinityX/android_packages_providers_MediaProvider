@@ -227,6 +227,7 @@ public class DatabaseHelper extends SQLiteOpenHelper implements AutoCloseable {
      * database connections, which then deadlocks.
      */
     private final ReentrantReadWriteLock mSchemaLock = new ReentrantReadWriteLock();
+    private String mCameraQuickUriColumnReadyPath;
 
     private static Object sMigrationLockInternal = new Object();
     private static Object sMigrationLockExternal = new Object();
@@ -572,6 +573,7 @@ public class DatabaseHelper extends SQLiteOpenHelper implements AutoCloseable {
     @Override
     public void onOpen(final SQLiteDatabase db) {
         Log.v(TAG, "onOpen() for " + mName);
+        ensureCameraQuickUriColumn(db);
         // Recovering before migration from legacy because recovery process will clear up data to
         // read from xattrs once ids are persisted in xattrs.
         if (isInternal()) {
@@ -843,6 +845,7 @@ public class DatabaseHelper extends SQLiteOpenHelper implements AutoCloseable {
         mTransactionState.set(new TransactionState());
 
         final SQLiteDatabase db = super.getWritableDatabase();
+        ensureCameraQuickUriColumn(db);
         mSchemaLock.readLock().lock();
         db.beginTransaction();
         db.execSQL("UPDATE local_metadata SET generation=generation+1;");
@@ -913,6 +916,7 @@ public class DatabaseHelper extends SQLiteOpenHelper implements AutoCloseable {
         // We carefully acquire the database here so that any schema changes can
         // be applied before acquiring the read lock below
         final SQLiteDatabase db = super.getWritableDatabase();
+        ensureCameraQuickUriColumn(db);
 
         if (mTransactionState.get() != null) {
             // Already inside a transaction, so we can run directly
@@ -938,6 +942,7 @@ public class DatabaseHelper extends SQLiteOpenHelper implements AutoCloseable {
         // We carefully acquire the database here so that any schema changes can
         // be applied before acquiring the read lock below
         final SQLiteDatabase db = super.getWritableDatabase();
+        ensureCameraQuickUriColumn(db);
 
         if (mTransactionState.get() != null) {
             // Already inside a transaction, so we can run directly
@@ -1172,6 +1177,7 @@ public class DatabaseHelper extends SQLiteOpenHelper implements AutoCloseable {
                 + "redacted_uri_id TEXT DEFAULT NULL, _user_id INTEGER DEFAULT "
                 + UserHandle.myUserId() + ", _special_format INTEGER DEFAULT NULL,"
                 + "oem_metadata BLOB DEFAULT NULL,"
+                + "_camera_quick_uri TEXT DEFAULT NULL,"
                 + "inferred_media_date INTEGER,"
                 + "bits_per_sample INTEGER DEFAULT NULL, samplerate INTEGER DEFAULT NULL,"
                 + "inferred_date INTEGER,"
@@ -1674,8 +1680,13 @@ public class DatabaseHelper extends SQLiteOpenHelper implements AutoCloseable {
     }
 
     private String getColumnsForCollection(Class<?> collection) {
-        return String.join(",", mProjectionHelper.getProjectionMap(collection).keySet())
-                + ",_modifier";
+        final StringBuilder columns = new StringBuilder(
+                String.join(",", mProjectionHelper.getProjectionMap(collection).keySet()))
+                .append(",_modifier");
+        if (collection == Images.Media.class) {
+            columns.append(",_camera_quick_uri");
+        }
+        return columns.toString();
     }
 
     @VisibleForTesting
@@ -2049,6 +2060,35 @@ public class DatabaseHelper extends SQLiteOpenHelper implements AutoCloseable {
         db.execSQL("ALTER TABLE files ADD COLUMN oem_metadata BLOB DEFAULT NULL;");
     }
 
+    private static boolean updateAddCameraQuickUri(SQLiteDatabase db) {
+        try (Cursor c = db.rawQuery("PRAGMA table_info(files)", null)) {
+            while (c.moveToNext()) {
+                if ("_camera_quick_uri".equals(c.getString(c.getColumnIndexOrThrow("name")))) {
+                    return false;
+                }
+            }
+        }
+        db.execSQL("ALTER TABLE files ADD COLUMN _camera_quick_uri TEXT DEFAULT NULL;");
+        return true;
+    }
+
+    private void ensureCameraQuickUriColumn(SQLiteDatabase db) {
+        final String path = db.getPath();
+        if (path.equals(mCameraQuickUriColumnReadyPath)) {
+            return;
+        }
+        mSchemaLock.writeLock().lock();
+        try {
+            if (!path.equals(mCameraQuickUriColumnReadyPath)) {
+                updateAddCameraQuickUri(db);
+                createLatestViews(db);
+                mCameraQuickUriColumnReadyPath = path;
+            }
+        } finally {
+            mSchemaLock.writeLock().unlock();
+        }
+    }
+
     private static void updateBackfillAsfMimeType(SQLiteDatabase db) {
         db.execSQL("UPDATE files SET media_type=? WHERE mime_type=\"application/vnd.ms-asf\";",
                 new String[]{String.valueOf(FileColumns.MEDIA_TYPE_VIDEO)});
@@ -2350,6 +2390,8 @@ public class DatabaseHelper extends SQLiteOpenHelper implements AutoCloseable {
             if (fromVersion < 1500) {
                 updateAddOemMetadata(db);
             }
+
+            updateAddCameraQuickUri(db);
 
             if (fromVersion < 1501) {
                 updateAddInferredMediaDate(db);

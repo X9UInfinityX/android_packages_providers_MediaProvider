@@ -13390,6 +13390,7 @@ public class MediaProvider extends ContentProvider {
         sMutableColumns.add(MediaStore.MediaColumns.IS_TRASHED);
         sMutableColumns.add(MediaStore.MediaColumns.IS_FAVORITE);
         sMutableColumns.add(MediaStore.MediaColumns.OWNER_PACKAGE_NAME);
+        sMutableColumns.add("_camera_quick_uri");
 
         sMutableColumns.add(MediaStore.Audio.AudioColumns.BOOKMARK);
 
@@ -13423,6 +13424,7 @@ public class MediaProvider extends ContentProvider {
         sPlacementColumns.add(MediaStore.MediaColumns.IS_PENDING);
         sPlacementColumns.add(MediaStore.MediaColumns.IS_TRASHED);
         sPlacementColumns.add(MediaStore.MediaColumns.DATE_EXPIRES);
+        sPlacementColumns.add("_camera_quick_uri");
     }
 
     /**
@@ -13488,7 +13490,21 @@ public class MediaProvider extends ContentProvider {
     }
 
     public ArrayMap<String, String> getProjectionMap(Class<?>... clazzes) {
-        return mProjectionHelper.getProjectionMap(clazzes);
+        final ArrayMap<String, String> map = mProjectionHelper.getProjectionMap(clazzes);
+        boolean includeCameraQuickUri = false;
+        for (Class<?> clazz : clazzes) {
+            if (clazz == Images.Media.class) {
+                includeCameraQuickUri = true;
+                break;
+            }
+        }
+        if (clazzes.length == 1 && clazzes[0] == Files.FileColumns.class) {
+            includeCameraQuickUri = true;
+        }
+        if (includeCameraQuickUri) {
+            map.put("_camera_quick_uri", "_camera_quick_uri");
+        }
+        return map;
     }
 
     static <T> boolean containsAny(Set<T> a, Set<T> b) {
