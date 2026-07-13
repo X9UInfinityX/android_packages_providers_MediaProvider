@@ -13424,7 +13424,6 @@ public class MediaProvider extends ContentProvider {
         sPlacementColumns.add(MediaStore.MediaColumns.IS_PENDING);
         sPlacementColumns.add(MediaStore.MediaColumns.IS_TRASHED);
         sPlacementColumns.add(MediaStore.MediaColumns.DATE_EXPIRES);
-        sPlacementColumns.add("_camera_quick_uri");
     }
 
     /**
